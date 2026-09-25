@@ -12,13 +12,45 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
-@EventBusSubscriber(modid=SophiMarket.MODID,bus=EventBusSubscriber.Bus.MOD)
+@EventBusSubscriber(modid = SophiMarket.MOD_ID, bus = EventBusSubscriber.Bus.MOD)
 public final class MarketNet {
- public record SellRequest(int slot,int amount) implements CustomPacketPayload {
-  public static final Type<SellRequest> TYPE=new Type<>(ResourceLocation.fromNamespaceAndPath(SophiMarket.MODID,"sell_request"));
-  public static final StreamCodec<RegistryFriendlyByteBuf,SellRequest> STREAM_CODEC=StreamCodec.of((b,m)->{b.writeVarInt(m.slot);b.writeVarInt(m.amount);},b->new SellRequest(b.readVarInt(),b.readVarInt()));
-  public Type<? extends CustomPacketPayload> type(){return TYPE;}
- }
- @SubscribeEvent public static void register(RegisterPayloadHandlersEvent e){e.registrar("1").playToServer(SellRequest.TYPE,SellRequest.STREAM_CODEC,MarketNet::sell);}
- private static void sell(SellRequest m,IPayloadContext c){c.enqueueWork(()->{if(!(c.player() instanceof ServerPlayer p))return; if(m.slot<9||m.slot>=p.getInventory().getContainerSize())return; ItemStack s=p.getInventory().getItem(m.slot); if(s.isEmpty())return; int n=Math.max(1,Math.min(m.amount,s.getCount())); int price=SellPrices.price(s); if(price<=0)return; s.shrink(n); MoneyData.add(p,(long)price*n);});}
+    private MarketNet() {}
+
+    public record SellRequest(int slot, int amount) implements CustomPacketPayload {
+        public static final Type<SellRequest> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(SophiMarket.MOD_ID, "sell_request"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, SellRequest> STREAM_CODEC = StreamCodec.of(
+                (buf, msg) -> {
+                    buf.writeVarInt(msg.slot());
+                    buf.writeVarInt(msg.amount());
+                },
+                buf -> new SellRequest(buf.readVarInt(), buf.readVarInt())
+        );
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
+    @SubscribeEvent
+    public static void register(RegisterPayloadHandlersEvent event) {
+        event.registrar("1").playToServer(SellRequest.TYPE, SellRequest.STREAM_CODEC, MarketNet::sell);
+    }
+
+    private static void sell(SellRequest request, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player)) return;
+
+        int slot = request.slot();
+        if (slot < 9 || slot >= player.getInventory().getContainerSize()) return;
+
+        ItemStack stack = player.getInventory().getItem(slot);
+        if (stack.isEmpty()) return;
+
+        int unitPrice = SellPrices.price(stack);
+        if (unitPrice <= 0) return;
+
+        int amount = Math.max(1, Math.min(request.amount(), stack.getCount()));
+        stack.shrink(amount);
+        MoneyData.add(player, (long) unitPrice * amount);
+    }
 }
