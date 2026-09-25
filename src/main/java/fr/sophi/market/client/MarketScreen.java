@@ -14,42 +14,112 @@ import java.util.List;
 
 public final class MarketScreen extends Screen {
     private enum Tab { BUY, SELL, JOBS, ENCHANT }
-    private record ShopEntry(ItemStack icon, String text) {}
+    private record ShopEntry(ItemStack icon, String name, String id, long price) {}
+    private record SellEntry(ItemStack icon, String name, int slot) {}
 
-    private Tab tab = Tab.JOBS;
+    private Tab tab = Tab.BUY;
     private JobType selectedJob = JobType.MINER;
     private int jobPage = 0;
     private int shopPage = 0;
+    private int quantity = 1;
+    private int enchantLevel = 1;
+    private String enchantName = "efficiency";
+
+    private static final ShopEntry[] SHOP = {
+        new ShopEntry(new ItemStack(Items.IRON_INGOT), "Fer", "minecraft:iron_ingot", 900),
+        new ShopEntry(new ItemStack(Items.GOLD_INGOT), "Or", "minecraft:gold_ingot", 1500),
+        new ShopEntry(new ItemStack(Items.DIAMOND), "Diamant", "minecraft:diamond", 1200),
+        new ShopEntry(new ItemStack(Items.EMERALD), "Émeraude", "minecraft:emerald", 850),
+        new ShopEntry(new ItemStack(Items.NETHERITE_INGOT), "Netherite", "minecraft:netherite_ingot", 12000),
+        new ShopEntry(new ItemStack(Items.COOKED_BEEF), "Steak", "minecraft:cooked_beef", 25),
+        new ShopEntry(new ItemStack(Items.OAK_LOG), "Bois", "minecraft:oak_log", 5),
+        new ShopEntry(new ItemStack(Items.STONE), "Pierre", "minecraft:stone", 3)
+    };
 
     public MarketScreen() { super(Component.literal("SophiMarket V2")); }
     @Override protected void init() { rebuildButtons(); }
 
+    private void command(String cmd) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null && mc.player.connection != null) mc.player.connection.sendCommand(cmd);
+    }
+
     private void rebuildButtons() {
-        clearWidgets(); int cx=width/2, y=45;
+        clearWidgets();
+        int cx=width/2, y=45;
         addRenderableWidget(Button.builder(Component.literal("ACHETER"), b -> switchTab(Tab.BUY)).bounds(cx-205,y,95,24).build());
         addRenderableWidget(Button.builder(Component.literal("VENDRE"), b -> switchTab(Tab.SELL)).bounds(cx-105,y,95,24).build());
         addRenderableWidget(Button.builder(Component.literal("MÉTIERS"), b -> switchTab(Tab.JOBS)).bounds(cx-5,y,95,24).build());
         addRenderableWidget(Button.builder(Component.literal("ENCHANT. / RÉPAR."), b -> switchTab(Tab.ENCHANT)).bounds(cx+95,y,120,24).build());
+        addRenderableWidget(Button.builder(Component.literal("💰 Actualiser solde"), b -> command("market money")).bounds(cx-205,75,130,20).build());
+
+        if(tab==Tab.BUY) addBuyButtons(cx);
+        if(tab==Tab.SELL) addSellButtons(cx);
         if(tab==Tab.JOBS) addJobButtons(cx);
-        if(tab==Tab.BUY || tab==Tab.SELL) addPageButtons(cx);
         if(tab==Tab.ENCHANT) addEnchantButtons(cx);
     }
 
     private void switchTab(Tab next){ tab=next; shopPage=0; rebuildButtons(); }
+
+    private void addBuyButtons(int cx) {
+        int start=shopPage*6, y=145;
+        for(int i=start;i<Math.min(SHOP.length,start+6);i++) {
+            ShopEntry e=SHOP[i];
+            addRenderableWidget(Button.builder(Component.literal("ACHETER"), b -> command("market buy "+e.id()+" "+quantity)).bounds(cx+105,y-3,78,20).build());
+            y+=30;
+        }
+        addRenderableWidget(Button.builder(Component.literal("-"),b->{quantity=Math.max(1,quantity-1);}).bounds(cx-70,335,28,20).build());
+        addRenderableWidget(Button.builder(Component.literal("+"),b->{quantity=Math.min(2304,quantity+1);}).bounds(cx+42,335,28,20).build());
+        addRenderableWidget(Button.builder(Component.literal("x16"),b->{quantity=16;}).bounds(cx+80,335,42,20).build());
+        addRenderableWidget(Button.builder(Component.literal("x64"),b->{quantity=64;}).bounds(cx+127,335,42,20).build());
+        addRenderableWidget(Button.builder(Component.literal("<"),b->{if(shopPage>0){shopPage--;rebuildButtons();}}).bounds(cx-190,365,35,20).build());
+        addRenderableWidget(Button.builder(Component.literal(">"),b->{if((shopPage+1)*6<SHOP.length){shopPage++;rebuildButtons();}}).bounds(cx+150,365,35,20).build());
+    }
+
+    private List<SellEntry> sellEntries() {
+        List<SellEntry> rows=new ArrayList<>();
+        Minecraft mc=Minecraft.getInstance();
+        if(mc.player!=null) {
+            var inv=mc.player.getInventory();
+            for(int slot=9;slot<inv.items.size();slot++) {
+                ItemStack s=inv.items.get(slot);
+                if(!s.isEmpty()) rows.add(new SellEntry(s.copy(),s.getHoverName().getString()+" x"+s.getCount(),slot));
+            }
+        }
+        return rows;
+    }
+
+    private void addSellButtons(int cx) {
+        List<SellEntry> rows=sellEntries();
+        int start=shopPage*6,y=145;
+        for(int i=start;i<Math.min(rows.size(),start+6);i++) {
+            SellEntry e=rows.get(i);
+            addRenderableWidget(Button.builder(Component.literal("VENDRE"), b -> {command("market sellslot "+e.slot()); rebuildButtons();}).bounds(cx+105,y-3,78,20).build());
+            y+=30;
+        }
+        addRenderableWidget(Button.builder(Component.literal("TOUT VENDRE (hors hotbar)"),b->{command("market sellall");rebuildButtons();}).bounds(cx-95,335,190,20).build());
+        addRenderableWidget(Button.builder(Component.literal("<"),b->{if(shopPage>0){shopPage--;rebuildButtons();}}).bounds(cx-190,365,35,20).build());
+        addRenderableWidget(Button.builder(Component.literal(">"),b->{if((shopPage+1)*6<rows.size()){shopPage++;rebuildButtons();}}).bounds(cx+150,365,35,20).build());
+    }
+
     private void addJobButtons(int cx) {
         int x=cx-190;
-        for(JobType job:JobType.values()) { JobType j=job; addRenderableWidget(Button.builder(Component.literal(job.icon()+" "+job.displayName()), b->{selectedJob=j;jobPage=0;}).bounds(x,86,90,24).build()); x+=95; }
-        addRenderableWidget(Button.builder(Component.literal("<"),b->{if(jobPage>0)jobPage--;}).bounds(cx-190,365,35,20).build());
-        addRenderableWidget(Button.builder(Component.literal("Page suivante >"),b->{if(jobPage<1)jobPage++;}).bounds(cx+65,365,120,20).build());
+        for(JobType job:JobType.values()) { JobType j=job; addRenderableWidget(Button.builder(Component.literal(job.icon()+" "+job.displayName()), b->{selectedJob=j;jobPage=0;}).bounds(x,105,90,24).build()); x+=95; }
+        addRenderableWidget(Button.builder(Component.literal("Quêtes"),b->{jobPage=0;}).bounds(cx-190,365,90,20).build());
+        addRenderableWidget(Button.builder(Component.literal("Récompenses"),b->{jobPage=1;}).bounds(cx+95,365,90,20).build());
     }
-    private void addPageButtons(int cx){
-        addRenderableWidget(Button.builder(Component.literal("<"),b->{if(shopPage>0)shopPage--;}).bounds(cx-190,365,35,20).build());
-        addRenderableWidget(Button.builder(Component.literal(">"),b->shopPage++).bounds(cx+150,365,35,20).build());
-    }
+
     private void addEnchantButtons(int cx){
-        addRenderableWidget(Button.builder(Component.literal("RÉPARER OBJET EN MAIN"),b->{}).bounds(cx-185,320,170,22).build());
-        addRenderableWidget(Button.builder(Component.literal("ENCHANTER OBJET EN MAIN"),b->{}).bounds(cx+15,320,170,22).build());
+        addRenderableWidget(Button.builder(Component.literal("RÉPARER"),b->command("market repair")).bounds(cx-185,320,110,22).build());
+        String[] names={"efficiency","fortune","unbreaking","mending","sharpness","protection"};
+        int x=cx-185;
+        for(String n:names){String chosen=n;addRenderableWidget(Button.builder(Component.literal(shortName(n)),b->{enchantName=chosen;}).bounds(x,265,58,20).build());x+=61;}
+        addRenderableWidget(Button.builder(Component.literal("Niv -"),b->{enchantLevel=Math.max(1,enchantLevel-1);}).bounds(cx-60,320,55,22).build());
+        addRenderableWidget(Button.builder(Component.literal("Niv +"),b->{enchantLevel=Math.min(5,enchantLevel+1);}).bounds(cx+5,320,55,22).build());
+        addRenderableWidget(Button.builder(Component.literal("ENCHANTER"),b->command("market enchant "+enchantName+" "+enchantLevel)).bounds(cx+75,320,110,22).build());
     }
+
+    private String shortName(String n){return switch(n){case "efficiency"->"Eff.";case "fortune"->"Fort.";case "unbreaking"->"Solid.";case "mending"->"Mend.";case "sharpness"->"Tranch.";case "protection"->"Prot.";default->n;};}
 
     @Override public void render(GuiGraphics g,int mouseX,int mouseY,float partialTick){
         renderBackground(g,mouseX,mouseY,partialTick); int cx=width/2;
@@ -59,67 +129,35 @@ public final class MarketScreen extends Screen {
     }
 
     private void renderBuy(GuiGraphics g,int cx){
-        g.drawCenteredString(font,"BOUTIQUE - ACHETER",cx,125,0xFFFFFF);
-        ShopEntry[] items={
-            new ShopEntry(new ItemStack(Items.IRON_INGOT),"Fer x16 — 900$"),
-            new ShopEntry(new ItemStack(Items.GOLD_INGOT),"Or x16 — 1 500$"),
-            new ShopEntry(new ItemStack(Items.DIAMOND),"Diamant x1 — 1 200$"),
-            new ShopEntry(new ItemStack(Items.EMERALD),"Émeraude x1 — 850$"),
-            new ShopEntry(new ItemStack(Items.NETHERITE_INGOT),"Netherite x1 — 12 000$"),
-            new ShopEntry(new ItemStack(Items.COOKED_BEEF),"Steak x16 — 400$"),
-            new ShopEntry(new ItemStack(Items.OAK_LOG),"Bois x64 — 300$"),
-            new ShopEntry(new ItemStack(Items.STONE),"Pierre x64 — 180$"),
-            new ShopEntry(new ItemStack(Items.DIAMOND_PICKAXE),"Pioche diamant — 8 000$"),
-            new ShopEntry(new ItemStack(Items.DIAMOND_SWORD),"Épée diamant — 7 500$"),
-            new ShopEntry(new ItemStack(Items.DIAMOND_CHESTPLATE),"Armure diamant — 30 000$"),
-            new ShopEntry(new ItemStack(Items.ENCHANTED_BOOK),"Livres enchantés — prix selon enchantement")
-        };
-        renderShopRows(g,cx,items,shopPage);
-        g.drawCenteredString(font,"Endium : non disponible à l'achat",cx,345,0xFF7777);
+        g.drawCenteredString(font,"BOUTIQUE - ACHETER",cx,112,0xFFFFFF);
+        int start=shopPage*6,y=145;
+        for(int i=start;i<Math.min(SHOP.length,start+6);i++){
+            ShopEntry e=SHOP[i]; g.fill(cx-190,y-4,cx+95,y+20,0x80363B44); g.renderItem(e.icon(),cx-184,y); g.drawString(font,e.name()+" — "+e.price()+"$ / unité",cx-160,y+4,0xFFFFFF); y+=30;
+        }
+        g.drawCenteredString(font,"Quantité : "+quantity,cx,338,0xFFFF55);
+        g.drawString(font,"Endium : non disponible à l'achat",cx-190,392,0xFF7777);
     }
 
     private void renderSell(GuiGraphics g,int cx){
-        g.drawCenteredString(font,"VENDRE - TON INVENTAIRE",cx,125,0xFFFFFF);
-        List<ShopEntry> rows=new ArrayList<>(); Minecraft mc=Minecraft.getInstance();
-        if(mc.player!=null) for(ItemStack s:mc.player.getInventory().items) if(!s.isEmpty()) rows.add(new ShopEntry(s.copy(),s.getHoverName().getString()+" x"+s.getCount()+" — vendable"));
-        if(rows.isEmpty()) rows.add(new ShopEntry(ItemStack.EMPTY,"Aucun objet vendable trouvé dans l'inventaire."));
-        renderShopRows(g,cx,rows.toArray(ShopEntry[]::new),shopPage);
-        g.drawString(font,"Les objets de ton inventaire affichent maintenant leur vraie icône.",cx-190,345,0xBBBBBB);
-    }
-
-    private void renderShopRows(GuiGraphics g,int cx,ShopEntry[] rows,int page){
-        int start=page*8,y=155;
-        for(int i=start;i<Math.min(rows.length,start+8);i++){
-            g.fill(cx-190,y-4,cx+190,y+16,0x80363B44);
-            if(!rows[i].icon().isEmpty()) g.renderItem(rows[i].icon(),cx-184,y-3);
-            g.drawString(font,rows[i].text(),cx-160,y,0xFFFFFF);
-            y+=23;
+        g.drawCenteredString(font,"VENDRE - TON INVENTAIRE",cx,112,0xFFFFFF);
+        List<SellEntry> rows=sellEntries(); int start=shopPage*6,y=145;
+        if(rows.isEmpty()) g.drawCenteredString(font,"Aucun objet à vendre (hotbar protégée).",cx,170,0xBBBBBB);
+        for(int i=start;i<Math.min(rows.size(),start+6);i++){
+            SellEntry e=rows.get(i); g.fill(cx-190,y-4,cx+95,y+20,0x80363B44); g.renderItem(e.icon(),cx-184,y); g.drawString(font,e.name(),cx-160,y+4,0xFFFFFF); y+=30;
         }
-        g.drawCenteredString(font,"Page "+(page+1),cx,370,0xAAAAAA);
     }
 
     private void renderJobs(GuiGraphics g,int cx){
-        int y=125; g.drawCenteredString(font,"MÉTIER : "+selectedJob.displayName().toUpperCase(),cx,y,0x55FF55);
+        int y=145; g.drawCenteredString(font,"MÉTIER : "+selectedJob.displayName().toUpperCase(),cx,y,0x55FF55);
         g.drawString(font,"Niveau 1 / 100",cx-185,y+25,0xFFFFFF); g.drawString(font,"XP : 0 / 325",cx-185,y+42,0xFFFFFF);
-        g.fill(cx-185,y+60,cx+185,y+70,0xFF555D6A); g.fill(cx-185,y+60,cx-175,y+70,0xFF55FF55);
-        if(jobPage==0){
-            String q=switch(selectedJob){case MINER->"Casser 64 minerais";case FARMER->"Récolter 128 cultures";case HUNTER->"Éliminer 30 créatures";case ALCHEMIST->"Préparer 10 potions";};
-            g.drawString(font,"QUÊTES DU JOUR",cx-185,y+92,0xFFFF5555); g.drawString(font,"1. "+q+" — 0% — +750 XP",cx-185,y+112,0xFFFFFF);
-            g.drawString(font,"2. Objectif bonus du métier — 0% — argent + XP",cx-185,y+132,0xFFFFFF); g.drawString(font,"3. Défi rare du métier — 0% — objet rare + XP",cx-185,y+152,0xFFFFFF);
-        } else {
-            g.drawString(font,"RÉCOMPENSES",cx-185,y+92,0x55FF55); g.drawString(font,"Niveau 5 — récompense commune",cx-185,y+112,0xFFFFFF);
-            g.drawString(font,"Niveau 10 — récompense rare",cx-185,y+132,0xFFFFFF); g.drawString(font,"Niveau 25 — outil / équipement",cx-185,y+152,0xFFFFFF);
-            g.drawString(font,"Niveau 50 — récompense très rare",cx-185,y+172,0xFFFFDD55); g.drawString(font,"Niveau 100 — Stuff Endium complet",cx-185,y+192,0xFF55FFFF);
-        }
+        if(jobPage==0){String q=switch(selectedJob){case MINER->"Casser 64 minerais";case FARMER->"Récolter 128 cultures";case HUNTER->"Éliminer 30 créatures";case ALCHEMIST->"Préparer 10 potions";};g.drawString(font,"QUÊTES DU JOUR",cx-185,y+85,0xFFFF5555);g.drawString(font,q+" — 0% — +750 XP",cx-185,y+108,0xFFFFFF);}else{g.drawString(font,"RÉCOMPENSES",cx-185,y+85,0x55FF55);g.drawString(font,"Niv. 5 / 10 / 25 / 50 : récompenses progressives",cx-185,y+108,0xFFFFFF);g.drawString(font,"Niveau 100 : Stuff Endium complet",cx-185,y+132,0xFF55FFFF);}
     }
 
     private void renderEnchant(GuiGraphics g,int cx){
-        g.drawCenteredString(font,"ENCHANTEMENT / RÉPARATION",cx,125,0x55FF55); Minecraft mc=Minecraft.getInstance(); ItemStack hand=mc.player==null?ItemStack.EMPTY:mc.player.getMainHandItem();
-        if(!hand.isEmpty()) g.renderItem(hand,cx-185,148);
-        g.drawString(font,"Objet en main : "+(hand.isEmpty()?"Aucun":hand.getHoverName().getString()),cx-160,155,0xFFFFFF);
-        g.drawString(font,"Enchantements proposés :",cx-185,185,0xFFFFDD55); g.drawString(font,"• Efficacité I → V     • Solidité I → III",cx-170,205,0xFFFFFF);
-        g.drawString(font,"• Fortune I → III      • Toucher de soie I",cx-170,225,0xFFFFFF); g.drawString(font,"• Tranchant I → V      • Protection I → IV",cx-170,245,0xFFFFFF);
-        g.drawString(font,"Le prix augmente avec le niveau choisi.",cx-185,280,0xBBBBBB);
+        g.drawCenteredString(font,"ENCHANTEMENT / RÉPARATION",cx,112,0x55FF55); Minecraft mc=Minecraft.getInstance(); ItemStack hand=mc.player==null?ItemStack.EMPTY:mc.player.getMainHandItem();
+        if(!hand.isEmpty())g.renderItem(hand,cx-185,145);g.drawString(font,"Objet en main : "+(hand.isEmpty()?"Aucun":hand.getHoverName().getString()),cx-160,150,0xFFFFFF);
+        g.drawString(font,"Choisi : "+enchantName+" niveau "+enchantLevel,cx-185,230,0xFFFFDD55);
+        g.drawString(font,"Les actions sont exécutées par SophiMarketServer 6.0.",cx-185,355,0xBBBBBB);
     }
 
     @Override public boolean isPauseScreen(){return false;}
